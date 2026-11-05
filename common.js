@@ -1,5 +1,5 @@
 window.Bunny={
-  async data(){const files=["site-data-meta.json","site-data-jobs-0.json","site-data-jobs-1.json","site-data-jobs-2.json","site-data-jobs-3.json","site-data-jobs-4.json"];const responses=await Promise.all(files.map(file=>fetch('./'+file,{cache:'no-cache'})));if(responses.some(response=>!response.ok))throw new Error('招聘数据读取失败');const [meta,...chunks]=await Promise.all(responses.map(response=>response.json()));return {...meta,jobs:chunks.flat()}},
+  async data(){const response=await fetch('./data/site-data.json',{cache:'no-cache'});if(!response.ok)throw new Error('招聘数据读取失败');return response.json()},
   e(value){return String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]))},
   cities(job){return String(job.cities||'').split(' / ').filter(Boolean)},
   categories(job){return String(job.categories||'').split(' / ').filter(Boolean)},
