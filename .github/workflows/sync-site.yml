@@ -1,0 +1,81 @@
+name: 每日同步招聘网页
+
+on:
+  schedule:
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-apple-bunny-site
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 读取公开网站仓库
+        uses: actions/checkout@v4
+
+      - name: 下载最新招聘网页和数据
+        shell: bash
+        env:
+          SOURCE_BASE: https://apple-bunny-official-jobs.vercel.app
+        run: |
+          set -euo pipefail
+          staging_dir="$(mktemp -d)"
+          mkdir -p "$staging_dir/apple-bunny" "$staging_dir/data"
+
+          files=(
+            index.html 404.html catalog.html job.html
+            app.js catalog.js job.js common.js styles.css icon.jpg
+          )
+          images=(
+            bunny-apple.jpg bunny-city.jpg bunny-flying.jpg bunny-megaphone.jpg
+          )
+
+          for file in "${files[@]}"; do
+            curl --fail --silent --show-error --location --retry 3               "$SOURCE_BASE/$file" --output "$staging_dir/$file"
+          done
+          for image in "${images[@]}"; do
+            curl --fail --silent --show-error --location --retry 3               "$SOURCE_BASE/apple-bunny/$image" --output "$staging_dir/apple-bunny/$image"
+          done
+          curl --fail --silent --show-error --location --retry 3             "$SOURCE_BASE/data/site-data.json" --output "$staging_dir/data/site-data.json"
+
+          grep -q '苹果兔职达' "$staging_dir/index.html"
+          node - "$staging_dir/data/site-data.json" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (!Array.isArray(data.jobs) || data.jobs.length === 0) {
+            throw new Error('岗位数据为空，停止覆盖现有网站');
+          }
+          if (!data.generatedAt) {
+            throw new Error('缺少 generatedAt，停止覆盖现有网站');
+          }
+          console.log(JSON.stringify({
+            generatedAt: data.generatedAt,
+            jobs: data.jobs.length,
+            companies: data.stats?.collected_companies ?? data.companies?.length ?? null
+          }));
+          NODE
+
+          rm -f site-data-meta.json site-data-jobs-*.json bunny-apple.jpg bunny-city.jpg bunny-flying.jpg bunny-megaphone.jpg
+          cp -R "$staging_dir"/. .
+          touch .nojekyll
+
+      - name: 保存并触发固定网址更新
+        shell: bash
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "网页已经是最新版本"
+            exit 0
+          fi
+          git config user.name "apple-bunny-site-bot"
+          git config user.email "apple-bunny-site-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "data: 同步每日招聘网页"
+          git push
